@@ -193,7 +193,7 @@ class SceneInfo {
 const int nCol = 600;
 const int nRow = 600;
 
-const int MAX_DEPTH = 3;
+const int MAX_DEPTH = 2;
 
 const glm::vec3 eye = glm::vec3(0.0, 0.0, 0.0);
 const glm::vec3 nCam = glm::vec3(0.0, 0.0, 1.0);
@@ -232,7 +232,7 @@ Ray closestIntersection(Ray r) {
 
         float t = min(t_plus, t_minus);
 
-        if(t < 1) {
+        if(t < 0.00001) {
             continue;
         }
 
@@ -259,15 +259,15 @@ Ray closestIntersection(Ray r) {
     return intersection;
 }
 
-glm::vec3 raytrace(Ray r) {
+glm::vec4 raytrace(Ray r) {
 
     if(r.depth > MAX_DEPTH) {
-        return glm::vec3(0,0,0);
+        return glm::vec4(0.0,0.0,0.0,0.0);
     }
 
     Ray intersection = closestIntersection(r);
     if(intersection.depth == MAX_DEPTH+1) {
-        return scene.background;
+        return glm::vec4(scene.background, 0.0);
     }
 
     // Ambient product
@@ -275,23 +275,52 @@ glm::vec3 raytrace(Ray r) {
                         intersection.sphere.ambient *
                         scene.ambient;
 
-    // Diffuse calculations
+    // Loop through lights
     glm::vec3 diffuse = glm::vec3(0.0, 0.0, 0.0);
-    glm::vec3 sphereColor = intersection.sphere.color;
+    glm::vec3 specular = glm::vec3(0.0, 0.0, 0.0);
+    Sphere sphere = intersection.sphere;
+
     for(int i=0; i<scene.lights.size(); i++) {
         Light light = scene.lights[i];
-
         glm::vec3 L = glm::vec3( glm::normalize(light.pos - intersection.S) );
+        glm::vec3 N = intersection.v;
 
-        float lightDotNormal = max( glm::dot(L, intersection.v), 0.0f );
-
-        diffuse += sphereColor * 
+        // Diffuse
+        float lightDotNormal = max( glm::dot(L, N), 0.0f );
+        diffuse += sphere.color * 
                    lightDotNormal * 
                    light.color * 
-                   intersection.sphere.diffuse;
+                   sphere.diffuse;
+
+        // Specular
+        glm::vec3 R = glm::reflect(-L, N);
+        glm::vec3 V = -1.0f * glm::normalize(intersection.S);
+        float specularShiny = pow( max(glm::dot(R, V), 0.0f), sphere.n );
+
+        if( glm::dot(L, N) < 0.0) {
+            specular += glm::vec3(0.0, 0.0, 0.0);
+        } else {
+            specular += light.color *
+                        sphere.specular * 
+                        specularShiny;
+        }
     }
 
-    return ambient + diffuse;
+    glm::vec4 clocal = glm::vec4( glm::vec3(ambient + diffuse + specular), 1.0);
+
+    // Reflected ray
+    Ray r_re;
+    r_re.S = intersection.S;
+    r_re.v = (-2 * ( glm::dot(intersection.v, r.v) ) * intersection.v) + r.v;
+    r_re.depth = r.depth + 1;
+
+    glm::vec4 c_re = raytrace(r_re);
+    
+    if(c_re[3] == 0.0) {
+        return clocal;
+    }
+
+    return clocal + (sphere.reflect * c_re);
 }
 
 int main(int argc, char *argv[]) { 
