@@ -46,35 +46,32 @@ string vecToString(glm::vec3 vec) {
     return "<" + to_string(vec.x) + ", " + to_string(vec.y) + ", " + to_string(vec.z) + ">\n";
 }
 
-class Ray {
-    public:
-        glm::vec3 v;
-        glm::vec3 S;
-        int depth;
-        glm::vec3 color;
+struct Sphere {
+    string name;
+
+    glm::vec3 pos;
+    glm::vec3 scale;
+    glm::vec3 color;
+
+    float ambient;
+    float diffuse;
+    float specular;
+    float reflect;
+    int n; 
 };
 
-class Sphere {
-    public:
-        string name;
+struct Light {
+    string name;
 
-        glm::vec3 pos;
-        glm::vec3 scale;
-        glm::ivec3 color;
-
-        int ambient;
-        int diffuse;
-        int specular;
-        int reflect;
-        int n; 
+    glm::vec3 pos;
+    glm::vec3 color;
 };
 
-class Light {
-    public:
-        string name;
-
-        glm::vec3 pos;
-        glm::ivec3 color;
+struct Ray {
+    glm::vec3 v;
+    glm::vec3 S;
+    int depth = 0;
+    Sphere sphere;
 };
 
 class SceneInfo {
@@ -84,8 +81,8 @@ class SceneInfo {
         int nCols, nRows;
         vector<Sphere> spheres;
         vector<Light> lights;
-        glm::ivec3 background;
-        glm::ivec3 ambient;
+        glm::vec3 background;
+        glm::vec3 ambient;
         string output;
 
         SceneInfo() = default;
@@ -146,15 +143,16 @@ class SceneInfo {
                 newSphere.scale = glm::vec3(
                     stof(split[5]), stof(split[6]), stof(split[7])
                 );
-                newSphere.color = glm::ivec3(
-                    int(255*stof(split[8])), 
-                    int(255*stof(split[9])), 
-                    int(255*stof(split[10]))
+                newSphere.color = glm::vec3(
+                    stof(split[8]), 
+                    stof(split[9]), 
+                    stof(split[10])
                 );
                 newSphere.ambient = stof(split[11]);
-                newSphere.specular = stof(split[12]);
-                newSphere.reflect = stof(split[13]);
-                newSphere.n = stoi(split[14]);
+                newSphere.diffuse = stof(split[12]);
+                newSphere.specular = stof(split[13]);
+                newSphere.reflect = stof(split[14]);
+                newSphere.n = stoi(split[15]);
 
                 this->spheres.push_back(newSphere);
 
@@ -164,26 +162,26 @@ class SceneInfo {
                 newLight.pos = glm::vec3(
                     stof(split[2]), stof(split[3]), stof(split[4])
                 );
-                newLight.color = glm::ivec3(
-                    int(255*stof(split[5])), 
-                    int(255*stof(split[6])), 
-                    int(255*stof(split[7]))
+                newLight.color = glm::vec3(
+                    stof(split[5]), 
+                    stof(split[6]), 
+                    stof(split[7])
                 );
 
                 this->lights.push_back(newLight);
 
             } else if(id == "BACK") {
-                this->background = glm::ivec3(
-                    int(255*stof(split[1])), 
-                    int(255*stof(split[2])), 
-                    int(255*stof(split[3]))
+                this->background = glm::vec3(
+                    stof(split[1]), 
+                    stof(split[2]), 
+                    stof(split[3])
                 );
 
             } else if(id == "AMBIENT") {
-                this->ambient = glm::ivec3(
-                    int(255*stof(split[1])), 
-                    int(255*stof(split[2])), 
-                    int(255*stof(split[3]))
+                this->ambient = glm::vec3(
+                    stof(split[1]), 
+                    stof(split[2]), 
+                    stof(split[3])
                 );
 
             } else if(id == "OUTPUT") {
@@ -195,7 +193,7 @@ class SceneInfo {
 const int nCol = 600;
 const int nRow = 600;
 
-const int MAX_DEPTH = 2;
+const int MAX_DEPTH = 3;
 
 const glm::vec3 eye = glm::vec3(0.0, 0.0, 0.0);
 const glm::vec3 nCam = glm::vec3(0.0, 0.0, 1.0);
@@ -213,25 +211,13 @@ Ray closestIntersection(Ray r) {
 
         // Transform ray
         Ray r_t;
-
-        r_t.S = glm::vec3(
-            (r.S.x/s.scale.x) - s.pos.x,
-            (r.S.y/s.scale.y) - s.pos.y,
-            (r.S.z/s.scale.z) - s.pos.z
-        );
-
-        r_t.v = glm::vec3(
-            (r.v.x/s.scale.x),
-            (r.v.y/s.scale.y),
-            (r.v.z/s.scale.z)
-        );
+        r_t.S = (r.S-s.pos)/s.scale;
+        r_t.v = r.v/s.scale;
 
         float B = glm::dot(r_t.S, r_t.v);
         float B_square = pow(B, 2);
         float A = pow(glm::length(r_t.v), 2);
         float C = pow(glm::length(r_t.S), 2) - 1;
-
-        cout << s.name + " " + to_string(B_square) + " - " + to_string(A) + "*" + to_string(C) + "\n"; 
 
         // No or one intersection
         if( B_square - (A*C) <= 0) {
@@ -245,9 +231,6 @@ Ray closestIntersection(Ray r) {
         float t_minus = quadratic_1 - quadratic_2;
 
         float t = min(t_plus, t_minus);
-
-        // cout << s.name + ":\n" + vecToString(r.v) + vecToString(r_t.v);
-        // cout << to_string(i) + ": " + s.name + " " + to_string(t) + "\n\n";
 
         if(t < 1) {
             continue;
@@ -265,9 +248,13 @@ Ray closestIntersection(Ray r) {
         return intersection;
     }
 
+    // Intersection and normal
     intersection.S = glm::vec3(r.S + (t_min*r.v));
-    intersection.v = glm::vec3( glm::normalize(intersection.S - closest.pos) );
-    intersection.color = closest.color;
+    intersection.v = glm::vec3( glm::normalize( 
+        (intersection.S-closest.pos)/(closest.scale*closest.scale)
+    ));
+
+    intersection.sphere = closest;
 
     return intersection;
 }
@@ -283,11 +270,28 @@ glm::vec3 raytrace(Ray r) {
         return scene.background;
     }
 
-    glm::vec3 clocal;
+    // Ambient product
+    glm::vec3 ambient = intersection.sphere.color *
+                        intersection.sphere.ambient *
+                        scene.ambient;
 
-    // glm::vec3 c_re = raytrace(r_re, spheres);
+    // Diffuse calculations
+    glm::vec3 diffuse = glm::vec3(0.0, 0.0, 0.0);
+    glm::vec3 sphereColor = intersection.sphere.color;
+    for(int i=0; i<scene.lights.size(); i++) {
+        Light light = scene.lights[i];
 
-    return intersection.color;
+        glm::vec3 L = glm::vec3( glm::normalize(light.pos - intersection.S) );
+
+        float lightDotNormal = max( glm::dot(L, intersection.v), 0.0f );
+
+        diffuse += sphereColor * 
+                   lightDotNormal * 
+                   light.color * 
+                   intersection.sphere.diffuse;
+    }
+
+    return ambient + diffuse;
 }
 
 int main(int argc, char *argv[]) { 
@@ -312,9 +316,9 @@ int main(int argc, char *argv[]) {
             r.depth = 1;
 
             glm::vec3 colors = raytrace(r);
-            pixels[k] = colors.x;
-			pixels[k+1] = colors.y;
-			pixels[k+2] = colors.z;
+            pixels[k] = min(colors.x*255.0f, 255.0f);
+			pixels[k+1] = min(colors.y*255.0f, 255.0f);
+			pixels[k+2] = min(colors.z*255.0f, 255.0f);
 
             k = k+3;
         }
