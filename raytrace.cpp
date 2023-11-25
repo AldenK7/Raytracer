@@ -72,6 +72,7 @@ struct Ray {
     glm::vec3 S;
     int depth = 0;
     Sphere sphere;
+    bool inside = false;
 };
 
 class SceneInfo {
@@ -190,9 +191,6 @@ class SceneInfo {
         }
 };
 
-const int nCol = 600;
-const int nRow = 600;
-
 const int MAX_DEPTH = 2;
 
 const glm::vec3 eye = glm::vec3(0.0, 0.0, 0.0);
@@ -205,6 +203,7 @@ SceneInfo scene = SceneInfo();
 Ray closestIntersection(Ray r) {
 
     Sphere closest;
+    bool inside = false;
     float t_min = FLT_MAX;
     for(int i=0; i<scene.spheres.size(); i++) {
         Sphere s = scene.spheres[i];
@@ -230,14 +229,24 @@ Ray closestIntersection(Ray r) {
         float t_plus  = quadratic_1 + quadratic_2;
         float t_minus = quadratic_1 - quadratic_2;
 
-        float t = min(t_plus, t_minus);
-
-        if(t < 0.00001) {
+        // Checking if point is going to be behind near plane
+        float t;
+        float cutoff = 1.0001;
+        if(t_plus < cutoff && t_minus < cutoff) {
             continue;
+        } else if(t_plus < cutoff) {
+            inside = true;
+            t = t_minus;
+        } else if(t_minus < cutoff) {
+            inside = true;
+            t = t_plus;
+        } else {
+            inside = false;
+            t = min(t_plus, t_minus);
         }
 
         if(t < t_min) {
-            closest = scene.spheres[i];
+            closest = s;
             t_min = t;
         }
     }
@@ -254,9 +263,59 @@ Ray closestIntersection(Ray r) {
         (intersection.S-closest.pos)/(closest.scale*closest.scale)
     ));
 
+    // If inside sphere, invert normal
+    if(inside) {
+        intersection.v = -1.0f*intersection.v;
+        intersection.inside = true;
+    }
+
     intersection.sphere = closest;
 
     return intersection;
+}
+
+bool inShadow(Ray r) {
+    
+    for(int i=0; i<scene.spheres.size(); i++) {
+        Sphere s = scene.spheres[i];
+
+        // Transform ray
+        glm::vec3 inflate = glm::vec3(0.0001, 0.0001, 0.0001);
+        if(r.inside) {
+            inflate = -1.0f*inflate;
+        }
+
+        Ray r_t;
+        r_t.S = (r.S - s.pos)/(s.scale+inflate);
+        r_t.v = r.v/s.scale;
+
+        float B = glm::dot(r_t.S, r_t.v);
+        float B_square = pow(B, 2);
+        float A = pow(glm::length(r_t.v), 2);
+        float C = pow(glm::length(r_t.S), 2) - 1;
+
+        float discr = B_square - (A*C);
+
+        // No intersection found
+        if( discr < 0 ) {
+            continue;
+        }
+
+        float quadratic_1 = (-B/A);
+        float quadratic_2 = sqrt(discr)/A;
+
+        float t_plus  = quadratic_1 + quadratic_2;
+        float t_minus = quadratic_1 - quadratic_2;
+
+        float t = min(t_plus, t_minus);
+
+        if(t > 0.0) {
+            return true;
+        }
+    }
+
+    // No intersections
+    return false;
 }
 
 glm::vec4 raytrace(Ray r) {
@@ -285,21 +344,32 @@ glm::vec4 raytrace(Ray r) {
         glm::vec3 L = glm::vec3( glm::normalize(light.pos - intersection.S) );
         glm::vec3 N = intersection.v;
 
-        // Diffuse
+        // If in shadow, light has no contribution
+        Ray shadowRay;
+        shadowRay.S = intersection.S;
+        shadowRay.v = L;
+        shadowRay.inside = intersection.inside;
+        shadowRay.sphere = sphere;
+
+        bool shadow = inShadow(shadowRay);
+        // In normal is pointing away from cam, invert shadows
+        if(shadow) {
+            continue;
+        }
+
+        // Diffuse -----------------------------------------------
         float lightDotNormal = max( glm::dot(L, N), 0.0f );
         diffuse += sphere.color * 
-                   lightDotNormal * 
-                   light.color * 
-                   sphere.diffuse;
+            lightDotNormal * 
+            light.color * 
+            sphere.diffuse;   
 
-        // Specular
+        // Specular -----------------------------------------------
         glm::vec3 R = glm::reflect(-L, N);
         glm::vec3 V = -1.0f * glm::normalize(intersection.S);
         float specularShiny = pow( max(glm::dot(R, V), 0.0f), sphere.n );
 
-        if( glm::dot(L, N) < 0.0) {
-            specular += glm::vec3(0.0, 0.0, 0.0);
-        } else {
+        if( glm::dot(L, N) >= 0.0) {
             specular += light.color *
                         sphere.specular * 
                         specularShiny;
