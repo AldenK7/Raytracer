@@ -7,6 +7,7 @@ using namespace std;
 #include <cmath>
 #include <vector>
 #include <fstream>
+#include <cstring>
 
 // Output in P3 format, a text file containing:
 // P3
@@ -92,24 +93,23 @@ class SceneInfo {
             ifstream file(testFile);
             string line;
             while(getline(file, line)) {
-                vector<string> split = splitLine(line);
-                parseLine(split);
+                if(!line.empty()) {
+                    vector<string> split = splitLine(line);
+                    parseLine(split);
+                }    
             }
         }
     
     private:
         vector<string> splitLine(string line) {
             vector<string> split;
-            int size = line.size();
-            int prev = 0;
-            for(int i=0; i<size; i++) {
-                if(line[i] == ' ') {
-                    split.push_back(line.substr(prev, i-prev));
-                    prev = i+1;
-                }
-            }
+            char* ptr;
+            ptr = strtok(line.data(), " \t");
 
-            split.push_back(line.substr(prev, size-prev));
+            while(ptr != NULL) {
+                split.push_back(ptr);
+                ptr = strtok(NULL, " \t");
+            }
 
             return split;
         }
@@ -191,7 +191,7 @@ class SceneInfo {
         }
 };
 
-const int MAX_DEPTH = 2;
+const int MAX_DEPTH = 3;
 
 const glm::vec3 eye = glm::vec3(0.0, 0.0, 0.0);
 const glm::vec3 nCam = glm::vec3(0.0, 0.0, 1.0);
@@ -232,6 +232,10 @@ Ray closestIntersection(Ray r) {
         // Checking if point is going to be behind near plane
         float t;
         float cutoff = 1.0001;
+        if(r.depth > 1) {
+            cutoff = 0.0001;
+        }
+
         if(t_plus < cutoff && t_minus < cutoff) {
             continue;
         } else if(t_plus < cutoff) {
@@ -274,19 +278,14 @@ Ray closestIntersection(Ray r) {
     return intersection;
 }
 
-bool inShadow(Ray r) {
+bool inShadow(Ray r, Light light) {
     
     for(int i=0; i<scene.spheres.size(); i++) {
         Sphere s = scene.spheres[i];
 
         // Transform ray
-        glm::vec3 inflate = glm::vec3(0.0001, 0.0001, 0.0001);
-        if(r.inside) {
-            inflate = -1.0f*inflate;
-        }
-
         Ray r_t;
-        r_t.S = (r.S - s.pos)/(s.scale+inflate);
+        r_t.S = (r.S - s.pos)/(s.scale);
         r_t.v = r.v/s.scale;
 
         float B = glm::dot(r_t.S, r_t.v);
@@ -297,7 +296,7 @@ bool inShadow(Ray r) {
         float discr = B_square - (A*C);
 
         // No intersection found
-        if( discr < 0 ) {
+        if( discr < 0) {
             continue;
         }
 
@@ -307,7 +306,20 @@ bool inShadow(Ray r) {
         float t_plus  = quadratic_1 + quadratic_2;
         float t_minus = quadratic_1 - quadratic_2;
 
-        float t = min(t_plus, t_minus);
+        float t;
+        if(t_plus < 0.0 && t_minus < 0.0) {
+            continue;
+        } else if(t_plus < 0.0) {
+            t = t_minus;
+        } else if(t_minus < 0.0) {
+            t = t_plus;
+        } else {
+            t = min(t_plus, t_minus);
+        }
+
+        if(t > 1.0f) {
+            continue;          
+        }
 
         if(t > 0.0) {
             return true;
@@ -346,12 +358,12 @@ glm::vec4 raytrace(Ray r) {
 
         // If in shadow, light has no contribution
         Ray shadowRay;
-        shadowRay.S = intersection.S;
-        shadowRay.v = L;
+        shadowRay.S = intersection.S + (0.0001f*intersection.v);
+        shadowRay.v = glm::vec3( light.pos - shadowRay.S );
         shadowRay.inside = intersection.inside;
         shadowRay.sphere = sphere;
 
-        bool shadow = inShadow(shadowRay);
+        bool shadow = inShadow(shadowRay, light);
         // In normal is pointing away from cam, invert shadows
         if(shadow) {
             continue;
